@@ -64,33 +64,48 @@ def start_upload(client, ms, file_path):
 
 def upload_doc():
 	import gdata
-	file_path =  os.environ['NAUTILUS_SCRIPT_SELECTED_FILE_PATHS'].strip()
-	type = mimetypes.guess_type(file_path)
-
-	if type[0] not in service.SUPPORTED_FILETYPES.values():
-		print type[0], service.SUPPORTED_FILETYPES
-		show_info("Unknown file type")
-		return
-	ms = gdata.MediaSource(file_path = file_path, content_type = type[0])
+	failed_uploads = []
+	successful_uploads = []
 	client = login_client()
 	if not client:
-		show_info("Could not upload")
+		show_info("Could not login to Google Doc.")
 		return
-	threading.Thread(target=start_upload, args=[client, ms, file_path.split("/")[-1]]).start()
-	x = show_progress()
-	perc = 0
-	while not done :
-		perc = perc + 10
-		show_progress(update="%d" % perc, proc=x)
-		time.sleep(1)
-	show_info("Done")
+
+	file_list =  os.environ['NAUTILUS_SCRIPT_SELECTED_FILE_PATHS'].split("\n")
+	
+	for file_path in file_list[:-1]:
+		type = mimetypes.guess_type(file_path)
+
+		if type[0] not in service.SUPPORTED_FILETYPES.values():
+			show_info("Unknown file type for %s" % file_path)
+			failed_uploads.append(file_path)
+			continue
+
+		ms = gdata.MediaSource(file_path = file_path, content_type = type[0])
+		threading.Thread(target=start_upload, args=[client, ms, file_path.split("/")[-1]]).start()
+		progress_text = "Uploading %s.." % file_path
+		x = show_progress(text = progress_text)
+		perc = 0
+		while not done :
+			if perc < 90:
+				perc = perc + 5
+			show_progress(update="%d" % perc, proc=x, text=progress_text)
+			time.sleep(1)
+		show_progress(update="100", proc=x, text=progress_text)
+		successful_uploads.append(file_path)
+	report = ""
+	if len(successful_uploads):
+		report = report + "\n\nFollowing docs were succesfully uploaded :\n * " + "\n * ".join(successful_uploads)
+	if len(failed_uploads):
+		report = report + "\n\nFollowing docs were not uploaded :\n * " + "\n * ".join(failed_uploads)
+	show_info(report)
 
 def show_info(text):
 	proc=Popen("zenity --info --text='%s'" % text, shell=True )
 	val = proc.communicate()
 	if not proc.returncode:
 		return val
-	print None
+	return None
 
 def get_value(text, hide=False):
 	if hide:
@@ -102,14 +117,14 @@ def get_value(text, hide=False):
 		return (not proc.returncode, val[0].strip())
 	return (not proc.returncode, None)
 
-def show_progress(update=False, proc=None):
+def show_progress(update=False, proc=None, text=""):
 	if not update:
-		proc=Popen("zenity --text 'Uploading' --progress --percentage=0 --auto-close", stdin=PIPE, shell=True)
+		proc=Popen("zenity --text '%s' --progress --percentage=0 --auto-close" % text, stdin=PIPE, shell=True)
 	else:
 		proc.stdin.write("%s\n"%update)
 	return proc
 	
-def main()
+def main():
 	try:
 		upload_doc()
 	except gdata.service.RequestError:
